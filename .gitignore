@@ -40,5 +40,6 @@ config.status
 libtool
 
 build/
+buildwasm/
 .DS_Store
 .vscode/
