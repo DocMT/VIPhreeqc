@@ -4,10 +4,7 @@
 
 #ifndef INC_IPHREEQC_HPP
 #define INC_IPHREEQC_HPP
-#ifdef __EMSCRIPTEN__
-// only if the emscripten framework is used, we want the bind code to be compiled
-#include <emscripten/bind.h>
-#endif
+
 #include <exception>
 #include <list>
 #include <vector>
@@ -914,7 +911,7 @@ public:
   /**
    * Returns a JSON representation of the specified surface
    */
-  std::string             GetSurfaceJSON(int surface);
+  //std::string             GetSurfaceJSON(int surface);
 
   // volume functions
   /**

@@ -1,5 +1,8 @@
 # CMAKE_MSVC_RUNTIME_LIBRARY requires 3.15
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.21)
+
+# for debugging only - comment or uncomment as necessary see https://github.com/ninja-build/ninja/issues/900#issuecomment-417917630
+# set(CMAKE_VERBOSE_MAKEFILE ON CACHE BOOL "ON")
 
 project (
   IPhreeqc
@@ -61,7 +64,9 @@ endif()
 set_source_files_properties(src/Var.c PROPERTIES LANGUAGE CXX)
 
 if (STANDALONE_BUILD)
-  option(BUILD_SHARED_LIBS "Build Shared Libraries" OFF)
+  if(NOT EMSCRIPTEN) # EMSCRIPTEN does not support LIB_TYPE SHARED, instead set -sSIDE_MODULE=1 or -sSIDE_MODULE=2
+    option(BUILD_SHARED_LIBS "Build Shared Libraries" OFF)
+  endif()
   set(LIB_TYPE STATIC)
 endif()
 
@@ -70,20 +75,62 @@ if (STANDALONE_BUILD)
     option(BUILD_CLR_LIBS "Build CLR Libraries" OFF)
   endif()
 endif()
-
-if (BUILD_SHARED_LIBS)
-  set(LIB_TYPE SHARED)
+if(NOT EMSCRIPTEN)
+  if (BUILD_SHARED_LIBS)
+    set(LIB_TYPE SHARED)
+  endif()
 endif()
 
 add_library(IPhreeqc ${LIB_TYPE} src/IPhreeqc.cpp)
 
-# EMSCRIPTEN - Build for phreeqpython with pyodide
+# EMSCRIPTEN - Build for phreeqpython with pyodide or build WASM module with Emscripten
 if(EMSCRIPTEN)
-  set(LIB_TYPE SHARED)
-  target_link_options(IPhreeqc PRIVATE -O3 -fwasm-exceptions)
+  option (IPHREEQC_ES6_MODULES "Build VIPhreeqc WASM ES6 module" OFF)
+  target_link_options(IPhreeqc PRIVATE -O3 -g0 -fwasm-exceptions -sSIDE_MODULE=1 -sENVIRONMENT=web,worker )
   target_compile_options(IPhreeqc PRIVATE -O3 -fwasm-exceptions)
   set_target_properties(IPhreeqc PROPERTIES PREFIX "")
   set_target_properties(IPhreeqc PROPERTIES OUTPUT_NAME "viphreeqc")
+  set_target_properties(IPhreeqc PROPERTIES SUFFIX ".so")
+  set_target_properties(IPhreeqc PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  if (IPHREEQC_ES6_MODULES)
+    set(CMAKE_EXECUTABLE_SUFFIX ".mjs")
+    add_executable(WASMIPhreeqc src/wasm.cpp)
+    set_target_properties(WASMIPhreeqc PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    target_link_libraries(IPhreeqc PRIVATE embind)
+    target_link_libraries(WASMIPhreeqc PRIVATE IPhreeqc embind)
+    target_compile_options(WASMIPhreeqc PRIVATE -O3 -g0 -fwasm-exceptions)
+    target_link_options(WASMIPhreeqc PRIVATE -fwasm-exceptions -sMODULARIZE=1 -sEXPORT_ES6=1 -sEXPORT_NAME='VIPhreeqc' -sLZ4=1 -sWASM=1 -sALLOW_MEMORY_GROWTH=1 -sMALLOC=emmalloc -sENVIRONMENT=web,worker -sMAIN_MODULE=1 --preload-file ${CMAKE_CURRENT_BINARY_DIR}/database@/database -O3 )
+    target_include_directories(WASMIPhreeqc 
+    PUBLIC
+      $<BUILD_INTERFACE:${IPhreeqc_SOURCE_DIR}/src>
+      $<BUILD_INTERFACE:${IPhreeqc_SOURCE_DIR}/src/phreeqcpp>
+      $<BUILD_INTERFACE:${IPhreeqc_SOURCE_DIR}/src/phreeqcpp/common>
+      $<BUILD_INTERFACE:${IPhreeqc_SOURCE_DIR}/src/phreeqcpp/PhreeqcKeywords>
+      $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+    )
+    set(EXAMPLE_DEPLOY_DIR "${CMAKE_BINARY_DIR}/examples/html/wasm")
+    add_custom_command(
+      TARGET WASMIPhreeqc POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy
+              $<TARGET_FILE:WASMIPhreeqc>
+              "${EXAMPLE_DEPLOY_DIR}/"
+      COMMENT "Copy *.js file to the example/html/wasm directory"
+    )
+    add_custom_command(
+      TARGET WASMIPhreeqc POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy
+              "$<TARGET_FILE_DIR:WASMIPhreeqc>/$<TARGET_FILE_BASE_NAME:WASMIPhreeqc>.wasm"
+              "${EXAMPLE_DEPLOY_DIR}/"
+      COMMENT "Copy *.wasm file to the example/html/wasm directory"
+    )
+    add_custom_command(
+      TARGET WASMIPhreeqc POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy
+              "$<TARGET_FILE_DIR:WASMIPhreeqc>/$<TARGET_FILE_BASE_NAME:WASMIPhreeqc>.data"
+              "${EXAMPLE_DEPLOY_DIR}/"
+      COMMENT "Copy *.data file to the example/html/wasm directory"
+    )
+  endif()
 endif()
 
 target_sources(IPhreeqc
@@ -415,9 +462,9 @@ include (CTest)
 if (STANDALONE_BUILD)
 
   add_subdirectory(database)
+  add_subdirectory(examples)
   if(NOT EMSCRIPTEN)
     add_subdirectory(doc)
-    add_subdirectory(examples)
   
     if (BUILD_TESTING)
       add_subdirectory(tests)
